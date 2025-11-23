@@ -4,13 +4,14 @@ import React, { useEffect, useRef, forwardRef, useImperativeHandle } from 'react
 interface CameraFeedProps {
   onStreamReady?: (stream: MediaStream) => void;
   onError?: (error: string) => void;
+  facingMode?: 'user' | 'environment';
 }
 
 export interface CameraHandle {
   captureFrame: () => string | null;
 }
 
-const CameraFeed = forwardRef<CameraHandle, CameraFeedProps>(({ onStreamReady, onError }, ref) => {
+const CameraFeed = forwardRef<CameraHandle, CameraFeedProps>(({ onStreamReady, onError, facingMode = 'user' }, ref) => {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useImperativeHandle(ref, () => ({
@@ -44,10 +45,16 @@ const CameraFeed = forwardRef<CameraHandle, CameraFeedProps>(({ onStreamReady, o
     let stream: MediaStream | null = null;
 
     const startCamera = async () => {
+      // Clean up previous stream if exists (crucial for switching cameras)
+      if (videoRef.current && videoRef.current.srcObject) {
+         const oldStream = videoRef.current.srcObject as MediaStream;
+         oldStream.getTracks().forEach(track => track.stop());
+      }
+
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           video: {
-            facingMode: 'user', // Default to front camera
+            facingMode: facingMode, // Use the prop to decide camera
             width: { ideal: 640 },
             height: { ideal: 480 }
           },
@@ -74,7 +81,7 @@ const CameraFeed = forwardRef<CameraHandle, CameraFeedProps>(({ onStreamReady, o
         stream.getTracks().forEach(track => track.stop());
       }
     };
-  }, [onError, onStreamReady]);
+  }, [onError, onStreamReady, facingMode]); // Re-run when facingMode changes
 
   return (
     <div className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden rounded-2xl shadow-inner">
@@ -84,6 +91,7 @@ const CameraFeed = forwardRef<CameraHandle, CameraFeedProps>(({ onStreamReady, o
         playsInline
         muted
         className="absolute inset-0 w-full h-full object-cover"
+        style={{ transform: facingMode === 'user' ? 'scaleX(-1)' : 'none' }} // Only mirror front camera
       />
     </div>
   );
