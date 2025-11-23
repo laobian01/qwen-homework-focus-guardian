@@ -1,0 +1,8 @@
+{
+  "name": "Copy of Homework Focus Guardian",
+  "description": "An AI-powered monitor that uses the camera to analyze study focus and provides voice alerts when distraction is detected.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
