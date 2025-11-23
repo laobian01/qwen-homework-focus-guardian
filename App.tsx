@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Play, Square, History, LayoutDashboard, Home, Settings, Trophy, Activity } from 'lucide-react';
+import { Play, Square, History, LayoutDashboard, Home, Settings, Trophy, Activity, SwitchCamera } from 'lucide-react';
 import CameraFeed, { CameraHandle } from './components/CameraFeed';
 import StatusIndicator from './components/StatusIndicator';
 import StatsView from './components/StatsView';
@@ -23,6 +23,9 @@ function App() {
   const [lastMessage, setLastMessage] = useState<string>("");
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Camera State
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
 
   // Gamification State
   const [stats, setStats] = useState<UserStats>({
@@ -69,6 +72,10 @@ function App() {
       localStorage.removeItem('custom_audio_blob');
       setUseCustomAudio(false);
     }
+  };
+
+  const toggleCamera = () => {
+    setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
   };
 
   // Modified speak function to accept an optional status override
@@ -238,7 +245,8 @@ function App() {
   };
 
   return (
-    <div className={`flex flex-col h-full w-full max-w-md mx-auto bg-gradient-to-b ${getBackgroundClass()} transition-colors duration-700 ease-in-out shadow-2xl overflow-hidden relative font-sans text-gray-100`}>
+    // FIX: Use 100dvh (Dynamic Viewport Height) to properly handle iOS Safari address bar resizing
+    <div className={`flex flex-col h-[100dvh] w-full max-w-md mx-auto bg-gradient-to-b ${getBackgroundClass()} transition-colors duration-700 ease-in-out shadow-2xl overflow-hidden relative font-sans text-gray-100`}>
       
       {/* Header */}
       <header className="px-5 py-4 bg-gray-900/60 backdrop-blur-xl z-20 flex justify-between items-center border-b border-white/5 sticky top-0 shrink-0">
@@ -284,19 +292,26 @@ function App() {
             {/* Camera Section - Enlarged */}
             {/* Changed from fixed aspect ratio to taking up 50% of vertical screen space */}
             <div className="relative w-full h-[50vh] bg-black rounded-3xl overflow-hidden shadow-2xl border border-white/10 group shrink-0">
-              <CameraFeed ref={cameraRef} onError={(err) => setErrorMsg(err)} />
+              <CameraFeed ref={cameraRef} onError={(err) => setErrorMsg(err)} facingMode={facingMode} />
               
               {/* Overlay Gradient */}
               <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none"></div>
 
-              {isMonitoring && (
-                <div className="absolute top-4 right-4 z-20">
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-black/40 backdrop-blur-md rounded-full border border-white/10 shadow-lg">
-                    <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.6)]"></div>
-                    <span className="text-[10px] font-bold text-white tracking-wider">LIVE</span>
-                  </div>
-                </div>
-              )}
+              {/* Camera Controls Overlay */}
+              <div className="absolute top-4 right-4 z-20 flex flex-col gap-3">
+                 {isMonitoring && (
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-black/40 backdrop-blur-md rounded-full border border-white/10 shadow-lg">
+                        <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.6)]"></div>
+                        <span className="text-[10px] font-bold text-white tracking-wider">LIVE</span>
+                    </div>
+                 )}
+                 <button 
+                    onClick={toggleCamera}
+                    className="p-2.5 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-white hover:bg-white/10 active:scale-90 transition-all shadow-lg"
+                 >
+                    <SwitchCamera size={18} />
+                 </button>
+              </div>
               
               {errorMsg && (
                 <div className="absolute inset-0 flex items-center justify-center bg-black/90 z-30 p-8 text-center backdrop-blur-sm">
