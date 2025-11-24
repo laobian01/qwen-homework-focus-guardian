@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Play, Square, History, LayoutDashboard, Home, Settings, Trophy, Activity, SwitchCamera, Lock, Unlock, Crown, AlertCircle, Bell, Send } from 'lucide-react';
+import { Play, Square, History, LayoutDashboard, Home, Settings, Trophy, Activity, SwitchCamera, Lock, Unlock, Crown, AlertCircle, Bell, Send, QrCode } from 'lucide-react';
 import CameraFeed, { CameraHandle } from './components/CameraFeed';
 import StatusIndicator from './components/StatusIndicator';
 import StatsView from './components/StatsView';
@@ -14,6 +14,10 @@ const CHECK_INTERVAL_MS = 5000;
 const DAILY_LIMIT_SECONDS = 20 * 60; // 20 Minutes Free Limit
 const ACTIVATION_CODE = "VIP888"; 
 const NOTIFICATION_COOLDOWN_MS = 3 * 60 * 1000; // 3 minutes cooldown between notifications
+
+// ⚠️ 开发者请在此处填入您申请的 WxPusher APP_TOKEN
+// 注册地址：https://wxpusher.zjiecode.com/admin/
+const WX_APP_TOKEN = "AT_xlpTGmVWlueGNGlft6UvD8ecGAwVW3kv"; 
 
 type ViewMode = 'monitor' | 'stats' | 'settings';
 
@@ -39,7 +43,6 @@ function App() {
 
   // Notification State
   const [notifyEnabled, setNotifyEnabled] = useState(false);
-  const [wxAppToken, setWxAppToken] = useState("");
   const [wxUid, setWxUid] = useState("");
   const lastNotificationTimeRef = useRef<number>(0);
 
@@ -82,10 +85,8 @@ function App() {
 
     // Load Notification Settings
     const savedNotify = localStorage.getItem('focus_notify_enabled');
-    const savedToken = localStorage.getItem('focus_wx_token');
     const savedUid = localStorage.getItem('focus_wx_uid');
     if (savedNotify === 'true') setNotifyEnabled(true);
-    if (savedToken) setWxAppToken(savedToken);
     if (savedUid) setWxUid(savedUid);
 
     const today = new Date().toDateString();
@@ -106,23 +107,22 @@ function App() {
   }, [dailyUsage]);
 
   // Save Notification Settings
-  const handleSaveNotification = (enabled: boolean, token: string, uid: string) => {
+  const handleSaveNotification = (enabled: boolean, uid: string) => {
     setNotifyEnabled(enabled);
-    setWxAppToken(token);
     setWxUid(uid);
     localStorage.setItem('focus_notify_enabled', String(enabled));
-    localStorage.setItem('focus_wx_token', token);
     localStorage.setItem('focus_wx_uid', uid);
   };
 
   const handleTestNotification = async () => {
-    if (!wxAppToken || !wxUid) {
-        alert("请先填写 App Token 和 UID");
+    if (!wxUid) {
+        alert("请先填写您的微信 UID");
         return;
     }
-    const success = await sendWeChatNotification(wxAppToken, [wxUid], "【专注卫士】测试消息：连接成功！孩子分心时您将收到通知。");
+    // Use hardcoded APP_TOKEN
+    const success = await sendWeChatNotification(WX_APP_TOKEN, [wxUid], "【专注卫士】测试消息：连接成功！孩子分心时您将收到通知。");
     if (success) alert("发送成功！请查看微信。");
-    else alert("发送失败，请检查 Token 或 UID 是否正确。");
+    else alert("发送失败，请检查 UID 是否正确，或是否已关注应用二维码。");
   };
 
   const handleActivate = () => {
@@ -252,20 +252,17 @@ function App() {
         }, ...prev].slice(0, 50));
       }
 
-      // Voice Alert Logic
       if (result.status === FocusStatus.DISTRACTED || result.status === FocusStatus.ABSENT) {
         speak(result.message, result.status);
         
-        // --- WeChat Notification Logic ---
-        if (notifyEnabled && wxAppToken && wxUid) {
+        // Use Hardcoded Token
+        if (notifyEnabled && WX_APP_TOKEN && WX_APP_TOKEN.startsWith("AT_") && wxUid) {
             const now = Date.now();
-            // Check cooldown
             if (now - lastNotificationTimeRef.current > NOTIFICATION_COOLDOWN_MS) {
                 const statusText = result.status === FocusStatus.DISTRACTED ? '分心' : '离开座位';
                 const content = `【专注卫士】提醒：检测到孩子${statusText}。\n当前状态：${result.message}`;
                 
-                // Send async, don't await
-                sendWeChatNotification(wxAppToken, [wxUid], content)
+                sendWeChatNotification(WX_APP_TOKEN, [wxUid], content)
                     .then(success => {
                         if (success) {
                             console.log("WeChat notification sent");
@@ -284,7 +281,7 @@ function App() {
     } catch (err) {
       console.error("Check failed", err);
     }
-  }, [speak, notifyEnabled, wxAppToken, wxUid]);
+  }, [speak, notifyEnabled, wxUid]);
 
   useEffect(() => {
       if (isMonitoring && !isPro && dailyUsage >= DAILY_LIMIT_SECONDS) {
@@ -626,10 +623,10 @@ function App() {
                                     </div>
                                     远程微信提醒
                                 </h3>
-                                <p className="text-xs text-gray-400">检测到分心时推送到家长微信 (需关注WxPusher)</p>
+                                <p className="text-xs text-gray-400">检测到分心时推送到家长微信 (需关注公众号)</p>
                             </div>
                             <button 
-                                onClick={() => handleSaveNotification(!notifyEnabled, wxAppToken, wxUid)}
+                                onClick={() => handleSaveNotification(!notifyEnabled, wxUid)}
                                 className={`w-12 h-7 rounded-full transition-all duration-300 relative focus:outline-none ${notifyEnabled ? 'bg-green-600' : 'bg-gray-700'}`}
                             >
                                 <div className={`absolute top-1 w-5 h-5 bg-white rounded-full shadow-md transition-all duration-300 ${notifyEnabled ? 'left-6' : 'left-1'}`}></div>
@@ -639,42 +636,42 @@ function App() {
                         {notifyEnabled && (
                             <div className="space-y-3 pt-2 border-t border-white/5 animate-in slide-in-from-top-2">
                                 <div>
-                                    <label className="text-xs text-gray-400 block mb-1">APP Token (应用密钥)</label>
-                                    <input 
-                                        type="password" 
-                                        value={wxAppToken}
-                                        onChange={(e) => handleSaveNotification(notifyEnabled, e.target.value, wxUid)}
-                                        placeholder="AT_xxxxxxxxxxxxxx"
-                                        className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-xs text-white"
-                                    />
+                                    <label className="text-xs text-gray-400 block mb-1">1. 扫码关注获取 UID</label>
+                                    <div className="flex items-center gap-3 bg-black/20 p-2 rounded-lg">
+                                        <div className="w-10 h-10 bg-white rounded flex items-center justify-center overflow-hidden">
+                                            <img 
+                                                src="https://wxpusher.zjiecode.com/api/qrcode/AaZHhVGB7HvCdJ5bMJXm8Zoiy9pDGFgVciWyt2zkk7sNTqYmqYO6lDKuhhHdEuS3.jpg" 
+                                                alt="关注二维码" 
+                                                className="w-full h-full object-cover"
+                                            />
+                                        </div>
+                                        <a 
+                                            href="https://wxpusher.zjiecode.com/api/qrcode/AaZHhVGB7HvCdJ5bMJXm8Zoiy9pDGFgVciWyt2zkk7sNTqYmqYO6lDKuhhHdEuS3.jpg" 
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-xs text-blue-400 underline"
+                                        >
+                                            点击查看关注二维码
+                                        </a>
+                                    </div>
                                 </div>
                                 <div>
-                                    <label className="text-xs text-gray-400 block mb-1">您的 UID (微信用户ID)</label>
+                                    <label className="text-xs text-gray-400 block mb-1">2. 填入您的 UID</label>
                                     <input 
                                         type="text" 
                                         value={wxUid}
-                                        onChange={(e) => handleSaveNotification(notifyEnabled, wxAppToken, e.target.value)}
+                                        onChange={(e) => handleSaveNotification(notifyEnabled, e.target.value)}
                                         placeholder="UID_xxxxxxxxxxxxxx"
                                         className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-xs text-white"
                                     />
                                 </div>
-                                <div className="flex gap-2">
-                                    <a 
-                                        href="https://wxpusher.zjiecode.com/admin/" 
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="flex-1 bg-white/5 hover:bg-white/10 text-gray-300 text-xs py-2 rounded-lg text-center transition-colors"
-                                    >
-                                        1. 获取 Token/UID
-                                    </a>
-                                    <button 
-                                        onClick={handleTestNotification}
-                                        className="flex-1 bg-green-600/20 hover:bg-green-600/30 text-green-400 text-xs py-2 rounded-lg flex items-center justify-center gap-1 transition-colors border border-green-500/30"
-                                    >
-                                        <Send size={12} />
-                                        测试发送
-                                    </button>
-                                </div>
+                                <button 
+                                    onClick={handleTestNotification}
+                                    className="w-full bg-green-600/20 hover:bg-green-600/30 text-green-400 text-xs py-2 rounded-lg flex items-center justify-center gap-1 transition-colors border border-green-500/30"
+                                >
+                                    <Send size={12} />
+                                    测试发送消息
+                                </button>
                             </div>
                         )}
                     </div>
