@@ -11,7 +11,7 @@ export interface CameraHandle {
   captureFrame: () => string | null;
 }
 
-const CameraFeed = forwardRef<CameraHandle, CameraFeedProps>(({ onStreamReady, onError, facingMode = 'user' }, ref) => {
+const CameraFeed = React.memo(forwardRef<CameraHandle, CameraFeedProps>(({ onStreamReady, onError, facingMode = 'user' }, ref) => {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useImperativeHandle(ref, () => ({
@@ -95,7 +95,7 @@ const CameraFeed = forwardRef<CameraHandle, CameraFeedProps>(({ onStreamReady, o
       />
     </div>
   );
-});
+}));
 
 CameraFeed.displayName = 'CameraFeed';
 export default CameraFeed;
