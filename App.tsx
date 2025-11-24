@@ -1,17 +1,19 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Play, Square, History, LayoutDashboard, Home, Settings, Trophy, Activity, SwitchCamera, Lock, Unlock, Crown, AlertCircle } from 'lucide-react';
+import { Play, Square, History, LayoutDashboard, Home, Settings, Trophy, Activity, SwitchCamera, Lock, Unlock, Crown, AlertCircle, Bell, Send } from 'lucide-react';
 import CameraFeed, { CameraHandle } from './components/CameraFeed';
 import StatusIndicator from './components/StatusIndicator';
 import StatsView from './components/StatsView';
 import VoiceRecorder from './components/VoiceRecorder';
 import { analyzeFrame } from './services/monitorService';
 import { checkBadges } from './services/gamification';
+import { sendWeChatNotification } from './services/notification';
 import { FocusStatus, LogEntry, AnalysisResult, UserStats, Badge } from './types';
 
 const CHECK_INTERVAL_MS = 5000;
 const DAILY_LIMIT_SECONDS = 20 * 60; // 20 Minutes Free Limit
-const ACTIVATION_CODE = "VIP888"; // Set your secret code here
+const ACTIVATION_CODE = "VIP888"; 
+const NOTIFICATION_COOLDOWN_MS = 3 * 60 * 1000; // 3 minutes cooldown between notifications
 
 type ViewMode = 'monitor' | 'stats' | 'settings';
 
@@ -35,6 +37,12 @@ function App() {
   const [showLimitModal, setShowLimitModal] = useState(false);
   const [inputCode, setInputCode] = useState("");
 
+  // Notification State
+  const [notifyEnabled, setNotifyEnabled] = useState(false);
+  const [wxAppToken, setWxAppToken] = useState("");
+  const [wxUid, setWxUid] = useState("");
+  const lastNotificationTimeRef = useRef<number>(0);
+
   // Gamification State
   const [stats, setStats] = useState<UserStats>({
     totalFocusTimeSeconds: 0,
@@ -57,25 +65,29 @@ function App() {
 
   // Initialize: Load Settings & Daily Usage
   useEffect(() => {
-    // Load Voices
     const loadVoices = () => {
       voicesRef.current = window.speechSynthesis.getVoices();
     };
     window.speechSynthesis.onvoiceschanged = loadVoices;
     loadVoices();
     
-    // Load Custom Audio
     const savedAudio = localStorage.getItem('custom_audio_blob');
     if (savedAudio) {
       setCustomAudio(savedAudio);
       setUseCustomAudio(true);
     }
 
-    // Load Pro Status
     const savedIsPro = localStorage.getItem('focus_guardian_is_pro');
     if (savedIsPro === 'true') setIsPro(true);
 
-    // Load Daily Usage
+    // Load Notification Settings
+    const savedNotify = localStorage.getItem('focus_notify_enabled');
+    const savedToken = localStorage.getItem('focus_wx_token');
+    const savedUid = localStorage.getItem('focus_wx_uid');
+    if (savedNotify === 'true') setNotifyEnabled(true);
+    if (savedToken) setWxAppToken(savedToken);
+    if (savedUid) setWxUid(savedUid);
+
     const today = new Date().toDateString();
     const savedDate = localStorage.getItem('focus_guardian_last_date');
     const savedUsage = localStorage.getItem('focus_guardian_daily_usage');
@@ -83,19 +95,36 @@ function App() {
     if (savedDate === today && savedUsage) {
       setDailyUsage(parseInt(savedUsage, 10));
     } else {
-      // New day, reset usage
       localStorage.setItem('focus_guardian_last_date', today);
       localStorage.setItem('focus_guardian_daily_usage', '0');
       setDailyUsage(0);
     }
   }, []);
 
-  // Persist usage when it changes
   useEffect(() => {
     localStorage.setItem('focus_guardian_daily_usage', dailyUsage.toString());
   }, [dailyUsage]);
 
-  // Activation Handler
+  // Save Notification Settings
+  const handleSaveNotification = (enabled: boolean, token: string, uid: string) => {
+    setNotifyEnabled(enabled);
+    setWxAppToken(token);
+    setWxUid(uid);
+    localStorage.setItem('focus_notify_enabled', String(enabled));
+    localStorage.setItem('focus_wx_token', token);
+    localStorage.setItem('focus_wx_uid', uid);
+  };
+
+  const handleTestNotification = async () => {
+    if (!wxAppToken || !wxUid) {
+        alert("请先填写 App Token 和 UID");
+        return;
+    }
+    const success = await sendWeChatNotification(wxAppToken, [wxUid], "【专注卫士】测试消息：连接成功！孩子分心时您将收到通知。");
+    if (success) alert("发送成功！请查看微信。");
+    else alert("发送失败，请检查 Token 或 UID 是否正确。");
+  };
+
   const handleActivate = () => {
     if (inputCode.trim().toUpperCase() === ACTIVATION_CODE) {
       setIsPro(true);
@@ -123,28 +152,22 @@ function App() {
     setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
   };
 
-  // Stable callback for camera error to prevent re-renders causing screen flash
   const handleCameraError = useCallback((err: string) => {
     setErrorMsg(err);
   }, []);
 
-  // Modified speak function to accept an optional status override
   const speak = useCallback((text: string, overrideStatus?: FocusStatus) => {
     if (!audioEnabled) return;
 
     const currentStatus = overrideStatus || status;
 
-    // Custom Audio Logic: Only play for negative states
     if (useCustomAudio && customAudio && (currentStatus === FocusStatus.DISTRACTED || currentStatus === FocusStatus.ABSENT)) {
        const audio = new Audio(customAudio);
        audio.play().catch(e => console.error("Audio play failed", e));
        return;
     }
 
-    // TTS Logic
     if (!window.speechSynthesis) return;
-    
-    // Cancel any ongoing speech
     if (window.speechSynthesis.speaking) {
         window.speechSynthesis.cancel();
     }
@@ -152,7 +175,6 @@ function App() {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'zh-CN'; 
     
-    // Improved Voice Selection Logic
     const voices = voicesRef.current.length > 0 ? voicesRef.current : window.speechSynthesis.getVoices();
     const preferredVoice = voices.find(v => 
         v.lang.includes('zh') && (v.name.includes('Google') || v.name.includes('Microsoft') || v.name.includes('Siri') || v.name.includes('Tingting'))
@@ -162,9 +184,8 @@ function App() {
         utterance.voice = preferredVoice;
     }
 
-    // Adjust pitch and rate for a friendlier tone
-    utterance.rate = 0.95; // Slightly slower
-    utterance.pitch = 1.05; // Slightly higher/brighter
+    utterance.rate = 0.95; 
+    utterance.pitch = 1.05; 
     
     window.speechSynthesis.speak(utterance);
   }, [audioEnabled, useCustomAudio, customAudio, status]);
@@ -197,7 +218,6 @@ function App() {
         setTimeout(() => setNewBadge(null), 4000);
         
         if (audioEnabled) {
-          // Use a simple direct call for badges to ensure it plays
           const u = new SpeechSynthesisUtterance(`恭喜！获得了徽章：${earnedBadge.name}`);
           u.lang = 'zh-CN';
           window.speechSynthesis.speak(u);
@@ -212,14 +232,9 @@ function App() {
     if (!cameraRef.current) return;
 
     lastCheckTimeRef.current = Date.now();
-
-    // captureFrame now returns null if camera isn't ready, preventing invalid API calls
     const frameBase64 = cameraRef.current.captureFrame();
     
-    if (!frameBase64) {
-        // Skip this cycle if camera isn't ready
-        return;
-    }
+    if (!frameBase64) return;
 
     try {
       const result: AnalysisResult = await analyzeFrame(frameBase64);
@@ -237,9 +252,29 @@ function App() {
         }, ...prev].slice(0, 50));
       }
 
-      // Explicitly pass the NEW status to speak, because setStatus is async and 'status' variable is stale here
+      // Voice Alert Logic
       if (result.status === FocusStatus.DISTRACTED || result.status === FocusStatus.ABSENT) {
         speak(result.message, result.status);
+        
+        // --- WeChat Notification Logic ---
+        if (notifyEnabled && wxAppToken && wxUid) {
+            const now = Date.now();
+            // Check cooldown
+            if (now - lastNotificationTimeRef.current > NOTIFICATION_COOLDOWN_MS) {
+                const statusText = result.status === FocusStatus.DISTRACTED ? '分心' : '离开座位';
+                const content = `【专注卫士】提醒：检测到孩子${statusText}。\n当前状态：${result.message}`;
+                
+                // Send async, don't await
+                sendWeChatNotification(wxAppToken, [wxUid], content)
+                    .then(success => {
+                        if (success) {
+                            console.log("WeChat notification sent");
+                            lastNotificationTimeRef.current = now;
+                        }
+                    });
+            }
+        }
+
       } else if (result.status === FocusStatus.FOCUSED) {
         if (Math.random() > 0.85) {
            speak(result.message, result.status);
@@ -248,11 +283,9 @@ function App() {
 
     } catch (err) {
       console.error("Check failed", err);
-      // Optional: handle visual error state if needed
     }
-  }, [speak]); // speak is now stable dependency
+  }, [speak, notifyEnabled, wxAppToken, wxUid]);
 
-  // Monitor Limit and Stop if Exceeded
   useEffect(() => {
       if (isMonitoring && !isPro && dailyUsage >= DAILY_LIMIT_SECONDS) {
           setIsMonitoring(false);
@@ -263,7 +296,6 @@ function App() {
 
   useEffect(() => {
     if (isMonitoring) {
-      // Check Limit first
       if (!isPro && dailyUsage >= DAILY_LIMIT_SECONDS) {
         setIsMonitoring(false);
         setShowLimitModal(true);
@@ -275,7 +307,6 @@ function App() {
       performCheck(); 
       timerRef.current = window.setInterval(performCheck, CHECK_INTERVAL_MS);
       
-      // Usage Timer (counts every second)
       usageTimerRef.current = window.setInterval(() => {
         setDailyUsage(prev => {
           const next = prev + 1;
@@ -320,7 +351,6 @@ function App() {
     }
   };
 
-  // Dynamic background based on status
   const getBackgroundClass = () => {
     switch (status) {
       case FocusStatus.FOCUSED: return 'from-gray-900 via-green-900/20 to-gray-900';
@@ -331,7 +361,6 @@ function App() {
   };
 
   return (
-    // FIX: Use 100dvh (Dynamic Viewport Height) to properly handle iOS Safari address bar resizing
     <div className={`flex flex-col h-[100dvh] w-full max-w-md mx-auto bg-gradient-to-b ${getBackgroundClass()} transition-colors duration-700 ease-in-out shadow-2xl overflow-hidden relative font-sans text-gray-100`}>
       
       {/* Limit Modal */}
@@ -497,8 +526,6 @@ function App() {
                         <span className="tracking-wide">开始</span>
                       </>
                     )}
-                    {/* Button Glow Effect */}
-                    {!isMonitoring && <div className="absolute inset-0 rounded-full bg-white/20 blur-md opacity-0 group-hover:opacity-50 transition-opacity"></div>}
                   </button>
               </div>
 
@@ -586,8 +613,70 @@ function App() {
                                 </div>
                             )}
                         </div>
-                        {/* Background Pattern */}
                         <div className="absolute -bottom-10 -right-10 w-40 h-40 bg-white/10 rounded-full blur-3xl"></div>
+                    </div>
+
+                    {/* --- REMOTE NOTIFICATION (WxPusher) --- */}
+                    <div className="bg-gray-800/60 backdrop-blur-md p-5 rounded-2xl border border-white/5 shadow-lg space-y-4">
+                        <div className="flex items-center justify-between">
+                            <div className="space-y-1">
+                                <h3 className="font-bold text-gray-100 flex items-center gap-2">
+                                    <div className="p-1 bg-green-500/20 rounded">
+                                        <Bell size={14} className="text-green-500" />
+                                    </div>
+                                    远程微信提醒
+                                </h3>
+                                <p className="text-xs text-gray-400">检测到分心时推送到家长微信 (需关注WxPusher)</p>
+                            </div>
+                            <button 
+                                onClick={() => handleSaveNotification(!notifyEnabled, wxAppToken, wxUid)}
+                                className={`w-12 h-7 rounded-full transition-all duration-300 relative focus:outline-none ${notifyEnabled ? 'bg-green-600' : 'bg-gray-700'}`}
+                            >
+                                <div className={`absolute top-1 w-5 h-5 bg-white rounded-full shadow-md transition-all duration-300 ${notifyEnabled ? 'left-6' : 'left-1'}`}></div>
+                            </button>
+                        </div>
+                        
+                        {notifyEnabled && (
+                            <div className="space-y-3 pt-2 border-t border-white/5 animate-in slide-in-from-top-2">
+                                <div>
+                                    <label className="text-xs text-gray-400 block mb-1">APP Token (应用密钥)</label>
+                                    <input 
+                                        type="password" 
+                                        value={wxAppToken}
+                                        onChange={(e) => handleSaveNotification(notifyEnabled, e.target.value, wxUid)}
+                                        placeholder="AT_xxxxxxxxxxxxxx"
+                                        className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-xs text-white"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs text-gray-400 block mb-1">您的 UID (微信用户ID)</label>
+                                    <input 
+                                        type="text" 
+                                        value={wxUid}
+                                        onChange={(e) => handleSaveNotification(notifyEnabled, wxAppToken, e.target.value)}
+                                        placeholder="UID_xxxxxxxxxxxxxx"
+                                        className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-xs text-white"
+                                    />
+                                </div>
+                                <div className="flex gap-2">
+                                    <a 
+                                        href="https://wxpusher.zjiecode.com/admin/" 
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="flex-1 bg-white/5 hover:bg-white/10 text-gray-300 text-xs py-2 rounded-lg text-center transition-colors"
+                                    >
+                                        1. 获取 Token/UID
+                                    </a>
+                                    <button 
+                                        onClick={handleTestNotification}
+                                        className="flex-1 bg-green-600/20 hover:bg-green-600/30 text-green-400 text-xs py-2 rounded-lg flex items-center justify-center gap-1 transition-colors border border-green-500/30"
+                                    >
+                                        <Send size={12} />
+                                        测试发送
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     {/* Audio Toggle */}
@@ -610,12 +699,6 @@ function App() {
                             existingAudio={customAudio} 
                             onSave={handleSaveAudio} 
                         />
-                    </div>
-                    
-                    <div className="mt-8 p-4 rounded-xl bg-blue-500/5 border border-blue-500/10">
-                        <p className="text-xs text-blue-300/80 text-center leading-relaxed">
-                            Tip: 建议将手机放置在侧前方，以便 AI 能清楚地看到小朋友写作业的状态。如果听不到声音，请检查手机是否开启了静音模式（如 iPhone 左侧的物理开关）。
-                        </p>
                     </div>
                 </div>
             </div>
