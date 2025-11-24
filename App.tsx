@@ -123,6 +123,11 @@ function App() {
     setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
   };
 
+  // Stable callback for camera error to prevent re-renders causing screen flash
+  const handleCameraError = useCallback((err: string) => {
+    setErrorMsg(err);
+  }, []);
+
   // Modified speak function to accept an optional status override
   const speak = useCallback((text: string, overrideStatus?: FocusStatus) => {
     if (!audioEnabled) return;
@@ -213,7 +218,6 @@ function App() {
     
     if (!frameBase64) {
         // Skip this cycle if camera isn't ready
-        console.warn("Camera frame not ready");
         return;
     }
 
@@ -259,13 +263,29 @@ function App() {
 
   useEffect(() => {
     if (isMonitoring) {
+      // Check Limit first
+      if (!isPro && dailyUsage >= DAILY_LIMIT_SECONDS) {
+        setIsMonitoring(false);
+        setShowLimitModal(true);
+        speak("今日免费时长已用完，请激活专业版");
+        return;
+      }
+
       lastCheckTimeRef.current = Date.now();
       performCheck(); 
       timerRef.current = window.setInterval(performCheck, CHECK_INTERVAL_MS);
       
       // Usage Timer (counts every second)
       usageTimerRef.current = window.setInterval(() => {
-        setDailyUsage(prev => prev + 1);
+        setDailyUsage(prev => {
+          const next = prev + 1;
+          if (!isPro && next >= DAILY_LIMIT_SECONDS) {
+            setIsMonitoring(false);
+            setShowLimitModal(true);
+            speak("今日免费时长已用完，请激活专业版");
+          }
+          return next;
+        });
       }, 1000);
 
     } else {
@@ -284,7 +304,7 @@ function App() {
       if (timerRef.current) clearInterval(timerRef.current);
       if (usageTimerRef.current) clearInterval(usageTimerRef.current);
     };
-  }, [isMonitoring, performCheck]);
+  }, [isMonitoring, performCheck, isPro, speak]);
 
   const toggleMonitoring = () => {
     if (!isMonitoring && !isPro && dailyUsage >= DAILY_LIMIT_SECONDS) {
@@ -421,7 +441,7 @@ function App() {
             
             {/* Camera Section - Enlarged */}
             <div className="relative w-full h-[50vh] bg-black rounded-3xl overflow-hidden shadow-2xl border border-white/10 group shrink-0">
-              <CameraFeed ref={cameraRef} onError={(err) => setErrorMsg(err)} facingMode={facingMode} />
+              <CameraFeed ref={cameraRef} onError={handleCameraError} facingMode={facingMode} />
               
               {/* Overlay Gradient */}
               <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none"></div>
@@ -477,6 +497,8 @@ function App() {
                         <span className="tracking-wide">开始</span>
                       </>
                     )}
+                    {/* Button Glow Effect */}
+                    {!isMonitoring && <div className="absolute inset-0 rounded-full bg-white/20 blur-md opacity-0 group-hover:opacity-50 transition-opacity"></div>}
                   </button>
               </div>
 
