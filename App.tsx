@@ -263,7 +263,7 @@ function App() {
                 const content = `【专注卫士】提醒：检测到孩子${statusText}。\n当前状态：${result.message}`;
                 
                 sendWeChatNotification(WX_APP_TOKEN, [wxUid], content)
-                    .then(success => {
+                    .then((success: boolean) => {
                         if (success) {
                             console.log("WeChat notification sent");
                             lastNotificationTimeRef.current = now;
@@ -647,7 +647,7 @@ function App() {
                                         </div>
                                         <a 
                                             href="https://wxpusher.zjiecode.com/api/qrcode/AaZHhVGB7HvCdJ5bMJXm8Zoiy9pDGFgVciWyt2zkk7sNTqYmqYO6lDKuhhHdEuS3.jpg" 
-                                            target="_blank"
+                                            target="_blank" 
                                             rel="noopener noreferrer"
                                             className="text-xs text-blue-400 underline"
                                         >
